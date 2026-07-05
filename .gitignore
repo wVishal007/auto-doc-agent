@@ -1,0 +1,22 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Environment variables (API keys)
+.env
+
+# Generated output documents
+generated_docs/
+
+# Node dependencies
+node_modules/
+
+# IDE/editor
+.vscode/
+.idea/
+
+# OS files
+Thumbs.db
+.DS_Store
+study.md
