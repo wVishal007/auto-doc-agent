@@ -2,11 +2,11 @@
 
 A Python-based autonomous AI agent that accepts natural language requests, plans tasks, executes them, and generates professional Word (.docx) documents.
 
-Built with FastAPI, LangChain, python-docx, and three AI providers: **Google AI Studio**, **NVIDIA NIM**, and **Mistral AI**.
+Built with FastAPI, LangChain, python-docx, and **Mistral AI** as the primary provider (with Google AI Studio and NVIDIA NIM available as alternatives).
 
 ## Architecture
 
-![Architecture](diagrams/architecture.png)
+![Overall Architecture](diagrams/overall-architecture.png)
 
 ## Agent Workflow
 
@@ -15,12 +15,14 @@ User Request
      │
      ▼
 Planner ──► Generator ──► Reflection ──► DOCX Builder
-(Google)    (NVIDIA)       (Google)       (python-docx)
+(Mistral)   (Mistral)      (Mistral)      (python-docx)
                 │               │
                 ▼               ▼
            Fallback          Optional
-           (Mistral)         Regeneration
+            (Mistral)         Regeneration
 ```
+
+![Agent Workflow](diagrams/agent-workflow.png)
 
 ## Folder Structure
 
@@ -51,6 +53,12 @@ project/
     planner_output.py     Planner output schema
 ```
 
+![Folder Structure](diagrams/architecture-doc-agent.png)
+
+## Component Architecture
+
+![Component Architecture](diagrams/component-architecture.png)
+
 ## Installation
 
 ```bash
@@ -63,17 +71,17 @@ pip install -r requirements.txt
 Create a `.env` file in the `project/` directory:
 
 ```
-GEMINI_API_KEY=your_gemini_api_key_here
-NVIDIA_API_KEY=your_nvidia_api_key_here
-MISTRAL_API_KEY=your_mistral_api_key_here
+MISTRAL_API_KEY=your_mistral_api_key_here        # Required (default provider)
+GEMINI_API_KEY=your_gemini_api_key_here           # Optional
+NVIDIA_API_KEY=your_nvidia_api_key_here           # Optional
 ```
 
-At least one API key is required. The `primary_model` and `fallback_model` in `config.py` determine which provider is used.
+At least a Mistral API key is required. The four model settings in `config.py` (`planner_model`, `generator_model`, `reflector_model`, `fallback_model`) determine which provider handles each role.
 
 Get free API keys at:
+- [Mistral AI](https://console.mistral.ai/api-keys/)
 - [Google AI Studio](https://makersuite.google.com/app/apikey)
 - [NVIDIA NIM](https://build.nvidia.com)
-- [Mistral AI](https://console.mistral.ai/api-keys/)
 
 ## Running Locally
 
@@ -119,6 +127,8 @@ Accepts a natural language request and returns a structured response with a gene
   ]
 }
 ```
+
+![Request Lifecycle](diagrams/request-lifecycle.png)
 
 ### GET /
 
@@ -167,21 +177,25 @@ This replaces the previous per-section regeneration with single-pass full-docume
 - **Dependency injection**: Components receive `llm` via parameter, never call `create_llm()` themselves
 - **Retry with exponential backoff**: Transient errors (429/5xx/timeout) retried up to 2 times with jitter
 - **Provider fallback**: If primary fails after retries, automatically switches to fallback provider
-- **Sequential execution**: Sections generated one at a time to avoid rate limit errors
+- **Single-pass execution**: Entire document generated in one LLM call — fast, consistent tone
 - **Quality scoring**: Reflection assigns a 1-10 score and identifies weak sections
 - **Instrumentation**: Every LLM call logs provider, model, duration, prompt/response size, retries
+
+![Retry & Fallback](diagrams/retry-mechanism.png)
 
 ## Provider Architecture
 
 The system supports three AI providers, switched by model name prefix:
 
-| Prefix | Provider | Example Model |
-|--------|----------|---------------|
-| `nvidia/` | NVIDIA NIM | `nvidia/nemotron-3-ultra-550b-a55b` |
-| `mistral` | Mistral AI | `mistral-large-latest` |
-| (anything else) | Google AI Studio | `gemma-4-31b-it` |
+| Prefix | Provider | Note |
+|--------|----------|------|
+| `mistral` | Mistral AI | **Default** — `mistral-small-latest` (planner, generator, reflector) / `mistral-large-latest` (fallback) |
+| `nvidia/` | NVIDIA NIM | Available — e.g. `nvidia/nemotron-3-ultra-550b-a55b` |
+| (anything else) | Google AI Studio | Available — e.g. `gemma-4-31b-it` |
 
-Set `primary_model` and `fallback_model` in `config.py` to any combination.
+Set `planner_model`, `generator_model`, `reflector_model`, and `fallback_model` in `config.py` to any combination.
+
+![Multi-Provider LLM Routing](diagrams/multi-llm-providers.png)
 
 ## Tradeoffs
 
@@ -202,3 +216,4 @@ Set `primary_model` and `fallback_model` in `config.py` to any combination.
 - Conversation memory for iterative document refinement
 - Web search tool for up-to-date research during generation
 - Parallel section-level generation with batched API calls for even faster execution
+- Provider-agnostic fallback chain (Mistral → NVIDIA → Google) with configurable order

@@ -7,15 +7,15 @@ class Settings(BaseSettings):
     nvidia_api_key: str = ""
     mistral_api_key: str = ""
 
-    planner_model: str = "gemma-4-31b-it"
-    generator_model: str = "nvidia/nemotron-3-ultra-550b-a55b"
-    reflector_model: str = "gemma-4-31b-it"
+    planner_model: str = "mistral-small-latest"
+    generator_model: str = "mistral-small-latest"
+    reflector_model: str = "mistral-small-latest"
     fallback_model: str = "mistral-large-latest"
 
     temperature: float = 0.3
-    request_timeout: int = 15
-    nvidia_max_tokens: int = 16384
-    mistral_max_tokens: int = 16384
+    request_timeout: int = 120
+    nvidia_max_tokens: int = 8192
+    mistral_max_tokens: int = 8192
 
     output_dir: str = "generated_docs"
     app_title: str = "Autonomous Agent API"

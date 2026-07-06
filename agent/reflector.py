@@ -70,29 +70,13 @@ def review_document(
     start = time.time()
     retries_before = tracker.retry_count
 
-    # DIAGNOSTIC - remove after debugging
-    def _diag_reflector_call():
-        _t0 = time.time()
-        print(f"  [DIAGNOSTIC] Reflector chain.invoke() starting at t={_t0:.3f}")
-        try:
-            _res = chain.invoke(
-                {
-                    "document_title": plan.document_title,
-                    "requested_sections": requested_sections,
-                    "full_document": full_document,
-                    "user_request": user_request,
-                }
-            )
-            _t1 = time.time()
-            print(f"  [DIAGNOSTIC] Reflector chain.invoke() succeeded at t={_t1:.3f} (+{_t1-_t0:.3f}s)")
-            return _res
-        except Exception as e:
-            _t1 = time.time()
-            print(f"  [DIAGNOSTIC] Reflector chain.invoke() FAILED at t={_t1:.3f} (+{_t1-_t0:.3f}s): {type(e).__name__} {repr(e)}")
-            raise
-
     response = invoke_with_retry(
-        _diag_reflector_call,
+        lambda: chain.invoke({
+            "document_title": plan.document_title,
+            "requested_sections": requested_sections,
+            "full_document": full_document,
+            "user_request": user_request,
+        }),
         label="Reflection",
     )
     duration = time.time() - start

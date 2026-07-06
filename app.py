@@ -31,10 +31,7 @@ async def health():
 
 
 @app.post("/agent", response_model=AgentResponse)
-async def agent_endpoint(request: AgentRequest):
-    # DIAGNOSTIC - remove after debugging
-    print(f"[DIAGNOSTIC] /agent request received: len={len(request.request)} chars")
-    print(f"[DIAGNOSTIC] /agent request preview: {repr(request.request[:200])}{'...' if len(request.request) > 200 else ''}")
+def agent_endpoint(request: AgentRequest):
 
     if not request.request.strip():
         raise HTTPException(status_code=400, detail="Request cannot be empty.")

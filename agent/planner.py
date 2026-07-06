@@ -29,21 +29,10 @@ def create_plan(user_request: str, llm: BaseLanguageModel) -> PlannerOutput:
     start = time.time()
     retries_before = tracker.retry_count
 
-    # DIAGNOSTIC - remove after debugging
-    def _diag_planner_call():
-        _t0 = time.time()
-        print(f"  [DIAGNOSTIC] Planner chain.invoke() starting at t={_t0:.3f}")
-        try:
-            _res = chain.invoke({"request": user_request})
-            _t1 = time.time()
-            print(f"  [DIAGNOSTIC] Planner chain.invoke() succeeded at t={_t1:.3f} (+{_t1-_t0:.3f}s)")
-            return _res
-        except Exception as e:
-            _t1 = time.time()
-            print(f"  [DIAGNOSTIC] Planner chain.invoke() FAILED at t={_t1:.3f} (+{_t1-_t0:.3f}s): {type(e).__name__} {repr(e)}")
-            raise
-
-    result = invoke_with_retry(_diag_planner_call, label="Planner")
+    result = invoke_with_retry(
+        lambda: chain.invoke({"request": user_request}),
+        label="Planner",
+    )
     duration = time.time() - start
     retries = tracker.retry_count - retries_before
 
