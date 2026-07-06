@@ -2,7 +2,7 @@
 
 A Python-based autonomous AI agent that accepts natural language requests, plans tasks, executes them, and generates professional Word (.docx) documents.
 
-Built with FastAPI, LangChain, Gemini API, and python-docx.
+Built with FastAPI, LangChain, python-docx, and three AI providers: **Google AI Studio**, **NVIDIA NIM**, and **Mistral AI**.
 
 ## Architecture
 
@@ -10,7 +10,17 @@ Built with FastAPI, LangChain, Gemini API, and python-docx.
 
 ## Agent Workflow
 
-![Agent Workflow](diagrams/agent-workflow.png)
+```
+User Request
+     │
+     ▼
+Planner ──► Generator ──► Reflection ──► DOCX Builder
+(Google)    (NVIDIA)       (Google)       (python-docx)
+                │               │
+                ▼               ▼
+           Fallback          Optional
+           (Mistral)         Regeneration
+```
 
 ## Folder Structure
 
@@ -23,16 +33,18 @@ project/
   generated_docs/         Output .docx files
   agent/
     planner.py            Task planning with structured output
-    executor.py           Section-by-section content generation
+    executor.py           Single-pass full document generation
     reflector.py          Quality review and self-check
     workflow.py           Orchestrates the full pipeline
   prompts/
     planner_prompt.py     Prompt template for planning
-    executor_prompt.py    Prompt template for content generation
+    executor_prompt.py    Prompt template for full document generation
     reflection_prompt.py  Prompt template for quality review
   services/
-    llm.py                Gemini LLM wrapper
-    document_generator.py python-docx document builder
+    llm.py                LLM factory (create_llm + get_provider_info + extract_text)
+    retry.py              Retry with exponential backoff + jitter
+    performance.py        Performance tracker and instrumentation
+    document_generator.py python-docx document builder (parses # headings)
   models/
     request.py            Request schema
     response.py           Response schema
@@ -52,9 +64,16 @@ Create a `.env` file in the `project/` directory:
 
 ```
 GEMINI_API_KEY=your_gemini_api_key_here
+NVIDIA_API_KEY=your_nvidia_api_key_here
+MISTRAL_API_KEY=your_mistral_api_key_here
 ```
 
-Get a free API key at [Google AI Studio](https://makersuite.google.com/app/apikey).
+At least one API key is required. The `primary_model` and `fallback_model` in `config.py` determine which provider is used.
+
+Get free API keys at:
+- [Google AI Studio](https://makersuite.google.com/app/apikey)
+- [NVIDIA NIM](https://build.nvidia.com)
+- [Mistral AI](https://console.mistral.ai/api-keys/)
 
 ## Running Locally
 
@@ -131,37 +150,55 @@ curl -X POST http://localhost:8000/agent \
 
 The reflector module (`agent/reflector.py`) implements a self-check mechanism:
 
-1. After content is generated, the reflector sends it to the LLM for review
-2. The LLM checks for completeness, professionalism, and quality
-3. If sections are missing or poorly written, it identifies what needs improvement
-4. Missing content is generated and merged into the final document
-5. Single-pass design keeps complexity low while improving output quality
+1. After the full document is generated, the reflector sends the entire document to the LLM for review
+2. The LLM checks for professionalism, grammar, missing sections, consistency, assumptions, and completeness
+3. If the document meets standards (PASS), it proceeds to DOCX generation
+4. If improvement is needed (IMPROVED), the **entire document is regenerated once** with the feedback incorporated
+5. Maximum 4 LLM calls: Plan → Generate → Reflect → Optional one regeneration
+
+This replaces the previous per-section regeneration with single-pass full-document regeneration, ensuring consistency across all sections while keeping the pipeline fast.
 
 ## Engineering Decisions
 
 - **Pipeline architecture** over dynamic agent loops: Predictable, debuggable, easy to trace failures
-- **Per-section generation** over monolithic generation: Better organization, modular, easier to review
+- **Single-pass document generation** over per-section generation: 6x faster, fewer LLM calls, consistent tone/style across sections
 - **PydanticOutputParser** for structured planning output: No regex parsing, type-safe, clean
-- **Gemini Free API**: Zero cost, good quality, accessible
-- **Single-pass reflection**: Simple, no infinite loops, sufficient for document quality
+- **Multi-provider support**: Google/NVIDIA/Mistral — switch by changing model name in config
+- **Dependency injection**: Components receive `llm` via parameter, never call `create_llm()` themselves
+- **Retry with exponential backoff**: Transient errors (429/5xx/timeout) retried up to 2 times with jitter
+- **Provider fallback**: If primary fails after retries, automatically switches to fallback provider
+- **Sequential execution**: Sections generated one at a time to avoid rate limit errors
+- **Quality scoring**: Reflection assigns a 1-10 score and identifies weak sections
+- **Instrumentation**: Every LLM call logs provider, model, duration, prompt/response size, retries
 
-## Multi-Model Architecture
+## Provider Architecture
 
-![Multi-Model Architecture](diagrams/multimodel%20architecture.png)
+The system supports three AI providers, switched by model name prefix:
+
+| Prefix | Provider | Example Model |
+|--------|----------|---------------|
+| `nvidia/` | NVIDIA NIM | `nvidia/nemotron-3-ultra-550b-a55b` |
+| `mistral` | Mistral AI | `mistral-large-latest` |
+| (anything else) | Google AI Studio | `gemma-4-31b-it` |
+
+Set `primary_model` and `fallback_model` in `config.py` to any combination.
 
 ## Tradeoffs
 
 | Choice | Benefit | Cost |
 |--------|---------|------|
 | Pipeline vs Agent Loop | Predictable, debuggable | Less flexible for open-ended tasks |
-| Per-section vs Monolithic | Better quality, modular | More LLM calls, slower |
-| Gemini vs Paid models | Free, good quality | Rate limits, requires internet |
+| Single-pass vs Per-section | 6x faster, consistent tone, fewer API calls | Less granular control per section |
+| Multi-provider | Provider flexibility | Multiple API keys needed |
+| Retry + fallback | Resilient to API outages | Slightly slower on failure |
+| Single-pass execution | Single LLM call, fast, consistent | Longer per-call context window needed |
 | Single-pass reflection | Simple, fast | May miss subtle issues |
 
 ## Future Improvements
 
-- Streaming responses for real-time progress
-- Multi-agent architecture for complex workflows
-- RAG integration for company-specific knowledge
-- Conversation memory for multi-turn interactions
-- Web search tool for up-to-date information
+- Streaming responses for real-time progress tracking
+- Multi-agent architecture for complex cross-document workflows
+- RAG integration for company-specific knowledge and templates
+- Conversation memory for iterative document refinement
+- Web search tool for up-to-date research during generation
+- Parallel section-level generation with batched API calls for even faster execution

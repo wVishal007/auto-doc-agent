@@ -7,6 +7,26 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
 
 
+def _split_by_headings(text: str):
+    pattern = re.compile(r"^#\s+(.+)$", re.MULTILINE)
+    sections = []
+    last_end = 0
+    last_heading = None
+
+    for match in pattern.finditer(text):
+        if last_heading is not None:
+            content = text[last_end:match.start()].strip()
+            sections.append((last_heading, content))
+        last_heading = match.group(1).strip()
+        last_end = match.end()
+
+    if last_heading is not None:
+        content = text[last_end:].strip()
+        sections.append((last_heading, content))
+
+    return sections
+
+
 def _add_bold_paragraph(doc, text: str, style_name: str = None):
     parts = re.split(r"(\*\*.*?\*\*)", text)
     para = doc.add_paragraph(style=style_name)
@@ -107,7 +127,7 @@ def _split_into_paragraphs(text: str):
     return result
 
 
-def build_docx(title: str, sections: dict, output_dir: str) -> str:
+def build_docx(title: str, full_document: str, output_dir: str) -> str:
     doc = Document()
 
     style = doc.styles["Normal"]
@@ -120,15 +140,18 @@ def build_docx(title: str, sections: dict, output_dir: str) -> str:
     title_heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
     _set_paragraph_spacing(title_heading, before=0, after=18)
 
-    for section_name, content in sections.items():
-        section_heading = doc.add_heading(section_name, level=1)
-        _set_paragraph_spacing(section_heading, before=16, after=8)
+    sections = _split_by_headings(full_document)
 
-        paragraphs = _split_into_paragraphs(content)
-        for line in paragraphs:
-            if line.strip().lower() == section_name.lower():
-                continue
-            _process_paragraph(doc, line)
+    for section_name, content in sections:
+        if isinstance(content, str):
+            section_heading = doc.add_heading(section_name, level=1)
+            _set_paragraph_spacing(section_heading, before=16, after=8)
+
+            paragraphs = _split_into_paragraphs(content)
+            for line in paragraphs:
+                if line.strip().lower() == section_name.lower():
+                    continue
+                _process_paragraph(doc, line)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     safe_title = "".join(c if c.isalnum() or c in " _-" else "_" for c in title)

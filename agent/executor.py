@@ -1,57 +1,95 @@
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import time
 
+from langchain_core.language_models import BaseLanguageModel
 from langchain_core.prompts import PromptTemplate
 
 from models.planner_output import PlannerOutput
 from prompts.executor_prompt import EXECUTOR_TEMPLATE
-from services.llm import extract_text, get_llm
+from services.llm import extract_text_or_raise, get_provider_info
+from services.performance import tracker
+from services.retry import invoke_with_retry
 
 
-def _generate_section(
+def generate_document(
     plan: PlannerOutput,
-    section: str,
     user_request: str,
-    prompt_template: PromptTemplate,
-    temperature: float,
-    use_fallback: bool = False,
-) -> tuple:
-    task = "fallback" if use_fallback else "content"
-    llm = get_llm(task=task, temperature=temperature)
-    chain = prompt_template | llm
-    all_sections = ", ".join(plan.sections)
-    response = chain.invoke(
-        {
-            "document_title": plan.document_title,
-            "section_name": section,
-            "user_request": user_request,
-            "all_sections": all_sections,
-        }
-    )
-    return section, extract_text(response).strip()
-
-
-def generate_content(plan: PlannerOutput, user_request: str, use_fallback: bool = False) -> dict:
+    llm: BaseLanguageModel,
+    feedback: str = "",
+) -> str:
     prompt = PromptTemplate(
         template=EXECUTOR_TEMPLATE,
         input_variables=[
             "document_title",
-            "section_name",
             "user_request",
-            "all_sections",
+            "sections",
+            "assumptions",
+            "feedback_section",
         ],
     )
 
-    raw = {}
-    with ThreadPoolExecutor(max_workers=len(plan.sections)) as executor:
-        futures = {
-            executor.submit(
-                _generate_section, plan, s, user_request, prompt, 0.4, use_fallback
-            ): s
-            for s in plan.sections
-        }
-        for future in as_completed(futures):
-            section, text = future.result()
-            raw[section] = text
+    sections_str = ", ".join(plan.sections)
+    assumptions_str = "\n".join(f"- {a}" for a in plan.assumptions) if plan.assumptions else "None"
+    feedback_section = (
+        f"\nPrevious Review Feedback:\n{feedback}\n\nAddress all issues mentioned above.\n"
+        if feedback
+        else ""
+    )
 
-    content = {s: raw[s] for s in plan.sections if s in raw}
-    return content
+    formatted = prompt.format(
+        document_title=plan.document_title,
+        user_request=user_request,
+        sections=sections_str,
+        assumptions=assumptions_str,
+        feedback_section=feedback_section,
+    )
+    prompt_chars = len(formatted)
+    provider, model = get_provider_info(llm.model)
+
+    chain = prompt | llm
+    start = time.time()
+    retries_before = tracker.retry_count
+
+    # DIAGNOSTIC - remove after debugging
+    def _diag_executor_call():
+        _t0 = time.time()
+        print(f"  [DIAGNOSTIC] Executor chain.invoke() starting at t={_t0:.3f}")
+        try:
+            _res = chain.invoke(
+                {
+                    "document_title": plan.document_title,
+                    "user_request": user_request,
+                    "sections": sections_str,
+                    "assumptions": assumptions_str,
+                    "feedback_section": feedback_section,
+                }
+            )
+            _t1 = time.time()
+            print(f"  [DIAGNOSTIC] Executor chain.invoke() succeeded at t={_t1:.3f} (+{_t1-_t0:.3f}s)")
+            return _res
+        except Exception as e:
+            _t1 = time.time()
+            print(f"  [DIAGNOSTIC] Executor chain.invoke() FAILED at t={_t1:.3f} (+{_t1-_t0:.3f}s): {type(e).__name__} {repr(e)}")
+            raise
+
+    response = invoke_with_retry(
+        _diag_executor_call,
+        label="Document Generation",
+        max_retries=1,
+    )
+    duration = time.time() - start
+    retries = tracker.retry_count - retries_before
+
+    full_text = extract_text_or_raise(response)
+
+    tracker.llm_call(
+        provider=provider,
+        model=model,
+        label="Document Generation",
+        duration=duration,
+        success=True,
+        retries=retries,
+        prompt_chars=prompt_chars,
+        response_chars=len(full_text),
+    )
+
+    return full_text

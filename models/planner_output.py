@@ -16,5 +16,7 @@ class PlannerOutput(BaseModel):
 
 class ReflectionResult(BaseModel):
     status: str = Field(description="PASS or IMPROVED")
+    quality_score: int = Field(default=7, ge=1, le=10, description="Overall quality score 1-10")
+    weak_sections: list = Field(default_factory=list, description="Sections needing improvement")
     feedback: str = Field(description="Review feedback")
     additional_content: dict = Field(default_factory=dict, description="Additional sections if IMPROVED")
