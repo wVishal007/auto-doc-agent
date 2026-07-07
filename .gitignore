@@ -7,7 +7,7 @@ __pycache__/
 .env
 
 # Generated output documents
-generated_docs/
+!generated_docs/
 
 # Node dependencies
 node_modules/
